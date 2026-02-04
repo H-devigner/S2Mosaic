@@ -1,3 +1,6 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "" # Force CPU to avoid OOM on busy GPU
+
 from s2mosaic import mosaic
 from pathlib import Path
 import numpy as np

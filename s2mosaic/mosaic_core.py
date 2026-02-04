@@ -254,11 +254,6 @@ def download_bands_pool(
             s2_scene_size=s2_scene_size,
             max_workers=max_workers,
             percentile_value=float(percentile_value),
-        mosaic = calculate_percentile_mosaic(
-            all_scene_data=all_scene_data,
-            s2_scene_size=s2_scene_size,
-            max_workers=max_workers,
-            percentile_value=float(percentile_value),
         )
 
     # For max_ndvi, logic is done in-place, no post-processing needed except clipping
