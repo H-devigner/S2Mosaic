@@ -106,7 +106,7 @@ def mosaic(
             If None, the mosaic is not saved to disk and is returned instead. Defaults to None.
         sort_method (str, optional): Method to sort scenes. Options are "valid_data", "oldest", or "newest". Defaults to "valid_data".
         sort_function (Callable, optional): Custom sorting function. If provided, overrides sort_method.
-        mosaic_method (str, optional): Method to create the mosaic. Options are "mean", "first", "median" or "percentile". Defaults to "mean".
+        mosaic_method (str, optional): Method to create the mosaic. Options are "mean", "first", "median", "percentile" or "max_ndvi". Defaults to "mean".
         duration_years (int, optional): Duration in years to add to the start date. Defaults to 0.
         duration_months (int, optional): Duration in months to add to the start date. Defaults to 0.
         duration_days (int, optional): Duration in days to add to the start date. Defaults to 0.

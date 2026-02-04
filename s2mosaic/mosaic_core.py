@@ -10,7 +10,13 @@ import scipy
 from tqdm.auto import tqdm
 
 from .data_reader import get_band_with_mask
-from .helpers import MOSAIC_FIRST, MOSAIC_MEAN, MOSAIC_PERCENTILE, format_progress
+from .helpers import (
+    MOSAIC_FIRST,
+    MOSAIC_MAX_NDVI,
+    MOSAIC_MEAN,
+    MOSAIC_PERCENTILE,
+    format_progress,
+)
 from .masking import get_masks
 from .mosaic_utils import calculate_percentile_mosaic
 
@@ -46,6 +52,14 @@ def download_bands_pool(
     if mosaic_method == MOSAIC_PERCENTILE:
         # For percentile, we need to store all values for each pixel
         all_scene_data = []
+    elif mosaic_method == MOSAIC_MAX_NDVI:
+        # For max_ndvi, we initialize mosaic normally but also need a buffer for NDVI values
+        # Initialize with -1.0 (NDVI range is -1 to 1)
+        mosaic = np.zeros((band_count, s2_scene_size, s2_scene_size), dtype=np.float32)
+        max_ndvi_buffer = np.full((s2_scene_size, s2_scene_size), -2.0, dtype=np.float32)
+
+        # Check if B04 and B08 are available in item assets, regardless of required_bands
+        # This will be handled inside the loop for each item
     else:
         # For mean and first, use the existing approach
         mosaic = np.zeros((band_count, s2_scene_size, s2_scene_size), dtype=np.float32)
@@ -75,6 +89,15 @@ def download_bands_pool(
         # else download all valid non cloudy pixels
         if mosaic_method == MOSAIC_FIRST:
             combo_mask = (good_pixel_tracker == 0) & combo_mask
+        
+        # For max_ndvi, we need to download NDVI bands first to determine which pixels to keep
+        current_ndvi_mask = None
+        if mosaic_method == MOSAIC_MAX_NDVI:
+            # We want to process pixels that are valid AND (either not filled yet OR have higher NDVI)
+            # But to know if they have higher NDVI, we must download bands first.
+            # So we use the standard combo_mask to download potential candidates.
+            # We will filter them after calculating NDVI.
+            pass
 
         good_pixel_tracker += combo_mask
 
@@ -91,9 +114,81 @@ def download_bands_pool(
         )
 
         with ThreadPoolExecutor(max_workers=max_dl_workers) as executor:
-            bands_and_profiles = list(
-                executor.map(get_band_with_mask_partial, hrefs_and_indexes)
-            )
+            if mosaic_method == MOSAIC_MAX_NDVI:
+                # 1. Download Red (B04) and NIR (B08) for NDVI calculation
+                ndvi_bands = ["B04", "B08"]
+                ndvi_hrefs_indexes = [
+                    (item.assets[band].href, 1) # B04/B08 are usually band 1 in their assets
+                    for band in ndvi_bands
+                ]
+                
+                get_ndvi_bands_partial = partial(
+                    get_band_with_mask,
+                    mask=combo_mask,
+                    debug_cache=debug_cache,
+                    mosaic_method=mosaic_method,
+                )
+                
+                ndvi_results = list(
+                    executor.map(get_ndvi_bands_partial, ndvi_hrefs_indexes)
+                )
+                
+                # Process Red and NIR
+                red_data, _ = ndvi_results[0]
+                nir_data, _ = ndvi_results[1]
+                
+                # Resize to scene size
+                red_data = scipy.ndimage.zoom(
+                    red_data,
+                    (s2_scene_size / red_data.shape[0], s2_scene_size / red_data.shape[1]),
+                    order=0,
+                )
+                nir_data = scipy.ndimage.zoom(
+                    nir_data,
+                    (s2_scene_size / nir_data.shape[0], s2_scene_size / nir_data.shape[1]),
+                    order=0,
+                )
+                
+                # Calculate NDVI
+                # Prevent division by zero
+                denom = (nir_data.astype(np.float32) + red_data.astype(np.float32))
+                with np.errstate(divide='ignore', invalid='ignore'):
+                    ndvi = (nir_data.astype(np.float32) - red_data.astype(np.float32)) / denom
+                
+                ndvi[denom == 0] = -2.0 # Handle no data/zero division
+                
+                # Determine better pixels (higher NDVI) within the valid cloud-free area
+                # We only want updates where combo_mask is True AND NDVI > current max
+                update_mask = combo_mask & (ndvi > max_ndvi_buffer)
+                
+                # Update NDVI buffer
+                max_ndvi_buffer[update_mask] = ndvi[update_mask]
+                
+                # Now we only download the REQUIRED bands for the pixels in update_mask
+                if not np.any(update_mask):
+                    # No better pixels found, skip downloading required bands
+                    bands_and_profiles = []
+                    # We might need to handle 'last_profile' if it's not set, but let's assume valid flow
+                else:
+                     # Update the mask to only fetch better pixels
+                    download_mask = update_mask
+                    
+                    get_band_update_partial = partial(
+                        get_band_with_mask,
+                        mask=download_mask,
+                        debug_cache=debug_cache,
+                        mosaic_method=mosaic_method,
+                    )
+                    
+                    bands_and_profiles = list(
+                        executor.map(get_band_update_partial, hrefs_and_indexes)
+                    )
+
+            else:
+                # Standard flow for other methods
+                bands_and_profiles = list(
+                    executor.map(get_band_with_mask_partial, hrefs_and_indexes)
+                )
 
         bands = []
 
@@ -112,6 +207,13 @@ def download_bands_pool(
         if mosaic_method == MOSAIC_PERCENTILE:
             scene_data = np.where(combo_mask, scene_data, np.nan)
             all_scene_data.append(scene_data)
+        elif mosaic_method == MOSAIC_MAX_NDVI:
+            if np.any(update_mask) and len(bands) > 0:
+                # We only have data for update_mask pixels
+                # Directly update the mosaic array for these pixels
+                # bands is shaped (bands, rows, cols)
+                for b_idx in range(scene_data.shape[0]):
+                    mosaic[b_idx][update_mask] = scene_data[b_idx][update_mask]
         else:
             mosaic += scene_data
 
@@ -152,8 +254,15 @@ def download_bands_pool(
             s2_scene_size=s2_scene_size,
             max_workers=max_workers,
             percentile_value=float(percentile_value),
+        mosaic = calculate_percentile_mosaic(
+            all_scene_data=all_scene_data,
+            s2_scene_size=s2_scene_size,
+            max_workers=max_workers,
+            percentile_value=float(percentile_value),
         )
 
+    # For max_ndvi, logic is done in-place, no post-processing needed except clipping
+    
     if mosaic_method == MOSAIC_MEAN:
         mosaic = np.divide(
             mosaic,
