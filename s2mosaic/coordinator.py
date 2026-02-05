@@ -1,6 +1,8 @@
 import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, overload
+from shapely.geometry import shape, Polygon, MultiPolygon
+from shapely.geometry.base import BaseGeometry
 
 import numpy as np
 
@@ -41,6 +43,7 @@ def mosaic(
     percentile_value: Optional[float] = None,
     ignore_duplicate_items: bool = True,
     bounds: Optional[Union[List[float], Tuple[float, float, float, float]]] = None,
+    geometry: Optional[Union[Dict[str, Any], BaseGeometry]] = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]: ...
 
 
@@ -67,6 +70,7 @@ def mosaic(
     percentile_value: Optional[float] = None,
     ignore_duplicate_items: bool = True,
     bounds: Optional[Union[List[float], Tuple[float, float, float, float]]] = None,
+    geometry: Optional[Union[Dict[str, Any], BaseGeometry]] = None,
 ) -> Path: ...
 
 
@@ -92,6 +96,7 @@ def mosaic(
     percentile_value: Optional[float] = None,
     ignore_duplicate_items: bool = True,
     bounds: Optional[Union[List[float], Tuple[float, float, float, float]]] = None,
+    geometry: Optional[Union[Dict[str, Any], BaseGeometry]] = None,
 ) -> Union[Tuple[np.ndarray, Dict[str, Any]], Path]:
     """
     Create a Sentinel-2 mosaic for a specified grid and time range.
@@ -101,7 +106,7 @@ def mosaic(
     a GeoTIFF file.
 
     Args:
-        grid_id (Optional[str]): The ID of the grid area. Optional if bounds are provided.
+        grid_id (Optional[str]): The ID of the grid area. Optional if bounds or geometry are provided.
         start_year (int): The start year of the time range.
         start_month (int, optional): The start month of the time range. Defaults to 1.
         start_day (int, optional): The start day of the time range. Defaults to 1.
@@ -123,6 +128,8 @@ def mosaic(
         ignore_duplicate_items (bool, optional): Remove duplicates. Defaults to True.
         bounds (Optional[Union[List[float], Tuple[float, float, float, float]]], optional): 
             Custom bounds (minx, miny, maxx, maxy). If provided, grid_id is optional.
+        geometry (Optional[Union[Dict[str, Any], BaseGeometry]], optional): 
+            Custom geometry (Shapely Polygon/MultiPolygon or GeoJSON dict). Overrides bounds.
 
     Returns:
         Union[Tuple[np.ndarray, Dict[str, Any]], Path]: If output_dir is None, returns a tuple
@@ -143,8 +150,8 @@ def mosaic(
     if additional_query is None:
         additional_query = {"eo:cloud_cover": {"lt": 100}}
 
-    if grid_id is None and bounds is None:
-        raise ValueError("Either grid_id or bounds must be provided.")
+    if grid_id is None and bounds is None and geometry is None:
+        raise ValueError("One of grid_id, bounds, or geometry must be provided.")
 
     if grid_id is None:
         # Use a placeholder if grid_id is not provided but logic expects a string
@@ -204,7 +211,21 @@ def mosaic(
         if export_path.exists() and not overwrite:
             return export_path
 
-    if bounds is None and grid_id is not None:
+    if geometry is not None:
+        if isinstance(geometry, dict):
+            search_geometry = shape(geometry)
+        else:
+            search_geometry = geometry
+        # For logging, we can use the centroid or bounds
+        logger.info(
+            f"Searching for scenes intersecting custom geometry "
+            f"from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}."
+        )
+        # Use geometry envelope for coverage calculation base if needed, 
+        # or just pass the geometry itself as 'bounds_poly' (which acts as the ROI)
+        bounds_poly = search_geometry 
+
+    elif bounds is None and grid_id is not None:
         bounds_poly = get_extent_from_grid_id(grid_id)
         logger.info(
             f"Searching for scenes in grid {grid_id} within bounds {bounds_poly} "
@@ -218,10 +239,10 @@ def mosaic(
             f"from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}."
         )
     else:
-        raise ValueError("Either grid_id or bounds must be provided")
+        raise ValueError("One of grid_id, bounds, or geometry must be provided")
 
     # Only buffer if using grid_id (legacy behavior to avoid edge effects)
-    # For custom bounds, use exact bounds (buffer=0)
+    # For custom bounds/geometry, use exact shape (buffer=0)
     search_bounds = bounds_poly.buffer(-0.05) if grid_id else bounds_poly
 
     items = search_for_items(

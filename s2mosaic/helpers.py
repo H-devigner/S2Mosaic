@@ -169,7 +169,7 @@ def get_output_path(
     output_dir.mkdir(exist_ok=True, parents=True)
     bands_str = "_".join(required_bands)
     
-    file_id = grid_id if grid_id else "custom_bbox"
+    file_id = grid_id if grid_id else "custom_area"
     
     export_path = output_dir / (
         f"{file_id}_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}_{sort_method}_{mosaic_method}_{bands_str}.tif"
