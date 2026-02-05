@@ -220,8 +220,12 @@ def mosaic(
     else:
         raise ValueError("Either grid_id or bounds must be provided")
 
+    # Only buffer if using grid_id (legacy behavior to avoid edge effects)
+    # For custom bounds, use exact bounds (buffer=0)
+    search_bounds = bounds_poly.buffer(-0.05) if grid_id else bounds_poly
+
     items = search_for_items(
-        bounds=bounds_poly.buffer(-0.05), # Slightly buffer in to avoid edge effects if needed, or remove for strict custom bounds
+        bounds=search_bounds,
         grid_id=grid_id,
         start_date=start_date,
         end_date=end_date,
