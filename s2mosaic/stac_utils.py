@@ -59,7 +59,7 @@ def search_for_items(
 
     query = {
         "collections": ["sentinel-2-l2a"],
-        "intersects": shapely.to_geojson(bounds),
+        "intersects": bounds,
         "datetime": f"{start_date.isoformat()}Z/{end_date.isoformat()}Z",
         "query": base_query,
     }
