@@ -45,13 +45,15 @@ def add_item_info(items: ItemCollection) -> DataFrame:
 
 def search_for_items(
     bounds: Polygon,
-    grid_id: str,
+    grid_id: str | None,
     start_date: date,
     end_date: date,
     additional_query: Dict[str, Any],
     ignore_duplicate_items: bool = True,
 ) -> ItemCollection:
-    base_query = {"s2:mgrs_tile": {"eq": grid_id}}
+    base_query = {}
+    if grid_id:
+        base_query["s2:mgrs_tile"] = {"eq": grid_id}
     if additional_query:
         base_query.update(additional_query)
 

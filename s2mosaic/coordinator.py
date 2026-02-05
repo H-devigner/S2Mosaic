@@ -40,6 +40,7 @@ def mosaic(
     additional_query: Optional[Dict[str, Any]] = None,
     percentile_value: Optional[float] = None,
     ignore_duplicate_items: bool = True,
+    bounds: Optional[Union[List[float], Tuple[float, float, float, float]]] = None,
 ) -> Tuple[np.ndarray, Dict[str, Any]]: ...
 
 
@@ -65,6 +66,7 @@ def mosaic(
     additional_query: Optional[Dict[str, Any]] = None,
     percentile_value: Optional[float] = None,
     ignore_duplicate_items: bool = True,
+    bounds: Optional[Union[List[float], Tuple[float, float, float, float]]] = None,
 ) -> Path: ...
 
 
@@ -89,6 +91,7 @@ def mosaic(
     additional_query: Optional[Dict[str, Any]] = None,
     percentile_value: Optional[float] = None,
     ignore_duplicate_items: bool = True,
+    bounds: Optional[Union[List[float], Tuple[float, float, float, float]]] = None,
 ) -> Union[Tuple[np.ndarray, Dict[str, Any]], Path]:
     """
     Create a Sentinel-2 mosaic for a specified grid and time range.
@@ -98,30 +101,28 @@ def mosaic(
     a GeoTIFF file.
 
     Args:
-        grid_id (str): The ID of the grid area for which to create the mosaic (e.g., "50HMH").
+        grid_id (Optional[str]): The ID of the grid area. Optional if bounds are provided.
         start_year (int): The start year of the time range.
-        start_month (int, optional): The start month of the time range. Defaults to 1 (January).
+        start_month (int, optional): The start month of the time range. Defaults to 1.
         start_day (int, optional): The start day of the time range. Defaults to 1.
         output_dir (Optional[Union[Path, str]], optional): Directory to save the output GeoTIFF.
-            If None, the mosaic is not saved to disk and is returned instead. Defaults to None.
-        sort_method (str, optional): Method to sort scenes. Options are "valid_data", "oldest", or "newest". Defaults to "valid_data".
-        sort_function (Callable, optional): Custom sorting function. If provided, overrides sort_method.
-        mosaic_method (str, optional): Method to create the mosaic. Options are "mean", "first", "median", "percentile" or "max_ndvi". Defaults to "mean".
-        duration_years (int, optional): Duration in years to add to the start date. Defaults to 0.
-        duration_months (int, optional): Duration in months to add to the start date. Defaults to 0.
-        duration_days (int, optional): Duration in days to add to the start date. Defaults to 0.
-        required_bands (List[str], optional): List of required spectral bands.
-            Defaults to ["B04", "B03", "B02", "B08"] (Red, Green, Blue, NIR).
-        no_data_threshold (float, optional): Threshold for no data values. Defaults to 0.01.
-        overwrite (bool, optional): Whether to overwrite existing output files. Defaults to True.
-        ocm_batch_size (int, optional): Batch size for OCM inference. Defaults to 1.
-        ocm_inference_dtype (str, optional): Data type for OCM inference. Defaults to "bf16".
-        debug_cache (bool, optional): Whether to cache downloads for faster debugging. Defaults to False.
-        additional_query (Dict[str, Any], optional): Additional query parameters for STAC API.
-            Defaults to {"eo:cloud_cover": {"lt": 100}}.
-        percentile_value (Optional[float], optional): If provided, calculates the specified percentile mosaic.
-            must be used with `mosaic_method='percentile'`. Defaults to None, can be a value between 0 and 100.
-        ignore_duplicate_items (bool, optional): Whether to remove duplicate scenes based on their IDs. Defaults to True.
+        sort_method (str, optional): Method to sort scenes. Defaults to "valid_data".
+        sort_function (Callable, optional): Custom sorting function.
+        mosaic_method (str, optional): Method to create the mosaic. Defaults to "mean".
+        duration_years (int, optional): Duration in years. Defaults to 0.
+        duration_months (int, optional): Duration in months. Defaults to 0.
+        duration_days (int, optional): Duration in days. Defaults to 0.
+        required_bands (List[str], optional): List of bands. Defaults to RGB+NIR.
+        no_data_threshold (float, optional): Threshold for no data. Defaults to 0.01.
+        overwrite (bool, optional): Whether to overwrite. Defaults to True.
+        ocm_batch_size (int, optional): Batch size. Defaults to 1.
+        ocm_inference_dtype (str, optional): Data type. Defaults to "bf16".
+        debug_cache (bool, optional): Whether to cache. Defaults to False.
+        additional_query (Dict[str, Any], optional): Additional query parameters.
+        percentile_value (Optional[float], optional): Percentile value. Defaults to None.
+        ignore_duplicate_items (bool, optional): Remove duplicates. Defaults to True.
+        bounds (Optional[Union[List[float], Tuple[float, float, float, float]]], optional): 
+            Custom bounds (minx, miny, maxx, maxy). If provided, grid_id is optional.
 
     Returns:
         Union[Tuple[np.ndarray, Dict[str, Any]], Path]: If output_dir is None, returns a tuple
@@ -141,6 +142,14 @@ def mosaic(
 
     if additional_query is None:
         additional_query = {"eo:cloud_cover": {"lt": 100}}
+
+    if grid_id is None and bounds is None:
+        raise ValueError("Either grid_id or bounds must be provided.")
+
+    if grid_id is None:
+        # Use a placeholder if grid_id is not provided but logic expects a string
+        # Ideally we should use this "custom_bounds" for logging/naming
+        pass
 
     if sort_function:
         sort_method = "custom"
@@ -195,29 +204,41 @@ def mosaic(
         if export_path.exists() and not overwrite:
             return export_path
 
-    bounds = get_extent_from_grid_id(grid_id)
+    if bounds is None and grid_id is not None:
+        bounds_poly = get_extent_from_grid_id(grid_id)
+        logger.info(
+            f"Searching for scenes in grid {grid_id} within bounds {bounds_poly} "
+            f"from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}."
+        )
+    elif bounds is not None:
+        from shapely.geometry import box
+        bounds_poly = box(*bounds)
+        logger.info(
+            f"Searching for scenes in custom bounds {bounds} "
+            f"from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}."
+        )
+    else:
+        raise ValueError("Either grid_id or bounds must be provided")
 
-    logger.info(
-        f"Searching for scenes in grid {grid_id} within bounds {bounds} "
-        f"from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}."
-    )
     items = search_for_items(
-        bounds=bounds.buffer(-0.05),
+        bounds=bounds_poly.buffer(-0.05), # Slightly buffer in to avoid edge effects if needed, or remove for strict custom bounds
         grid_id=grid_id,
         start_date=start_date,
         end_date=end_date,
         additional_query=additional_query,
         ignore_duplicate_items=ignore_duplicate_items,
     )
-    logger.info(f"Found {len(items)} scenes for grid {grid_id}.")
+    
+    search_id = grid_id if grid_id else "custom_area"
+    logger.info(f"Found {len(items)} scenes for {search_id}.")
     if len(items) == 0:
         raise Exception(
-            f"No scenes found for {grid_id} between {start_date.strftime('%Y-%m-%d')} "
+            f"No scenes found for {search_id} between {start_date.strftime('%Y-%m-%d')} "
             f"and {end_date.strftime('%Y-%m-%d')}"
         )
 
     # for scenes with only partial S2 coverage work out which pixels are covered
-    coverage_mask = get_frequent_coverage(scene_bounds=bounds, scenes=items)
+    coverage_mask = get_frequent_coverage(scene_bounds=bounds_poly, scenes=items)
 
     items_with_orbits = add_item_info(items)
 

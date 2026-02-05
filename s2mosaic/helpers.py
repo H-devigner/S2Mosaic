@@ -90,14 +90,15 @@ def validate_inputs(
     mosaic_method: str,
     no_data_threshold: Union[float, None],
     required_bands: List[str],
-    grid_id: str,
+    grid_id: Optional[str],
     percentile_value: Optional[float],
 ) -> None:
-    if not grid_id.isalnum() or not grid_id.isupper():
-        raise ValueError(
-            f"""Grid {grid_id} is invalid. It should be in the format '50HMH'. 
-            For more info on the S2 grid system visit https://sentiwiki.copernicus.eu/web/s2-products"""
-        )
+    if grid_id:
+        if not grid_id.isalnum() or not grid_id.isupper():
+            raise ValueError(
+                f"""Grid {grid_id} is invalid. It should be in the format '50HMH'. 
+                For more info on the S2 grid system visit https://sentiwiki.copernicus.eu/web/s2-products"""
+            )
     if sort_method not in VALID_SORT_METHODS:
         raise ValueError(
             f"Invalid sort method: {sort_method}. Must be one of {VALID_SORT_METHODS}"
@@ -156,7 +157,7 @@ def validate_inputs(
 
 def get_output_path(
     output_dir: Union[Path, str],
-    grid_id: str,
+    grid_id: Optional[str],
     start_date: date,
     end_date: date,
     sort_method: str,
@@ -165,9 +166,13 @@ def get_output_path(
 ) -> Path:
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
+    output_dir.mkdir(exist_ok=True, parents=True)
     bands_str = "_".join(required_bands)
+    
+    file_id = grid_id if grid_id else "custom_bbox"
+    
     export_path = output_dir / (
-        f"{grid_id}_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}_{sort_method}_{mosaic_method}_{bands_str}.tif"
+        f"{file_id}_{start_date.strftime('%Y-%m-%d')}_to_{end_date.strftime('%Y-%m-%d')}_{sort_method}_{mosaic_method}_{bands_str}.tif"
     )
     return export_path
 
