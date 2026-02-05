@@ -59,10 +59,11 @@ def search_for_items(
 
     query = {
         "collections": ["sentinel-2-l2a"],
-        "intersects": bounds,
+        "intersects": shapely.geometry.mapping(bounds),
         "datetime": f"{start_date.isoformat()}Z/{end_date.isoformat()}Z",
-        "query": base_query,
     }
+    if base_query:
+        query["query"] = base_query
 
     logger.info(
         f"""Searching for items in grid {grid_id} from 
