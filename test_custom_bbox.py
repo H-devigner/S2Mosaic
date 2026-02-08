@@ -1,33 +1,41 @@
-import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "" # Force CPU
-
+"""
+Test script for custom bbox/geometry from a GeoJSON file.
+Usage: python3 test_custom_bbox.py
+"""
+import json
 from s2mosaic import mosaic
 from pathlib import Path
 
-# Test configuration: Small custom bbox (part of 50HMH/Perth approx)
-# format: (minx, miny, maxx, maxy)
-custom_bounds = (115.8, -32.0, 115.85, -31.95)
+# Load your GeoJSON file
+geojson_path = Path("test.geojson")
 
-output_dir = Path("test_output_custom")
+with open(geojson_path) as f:
+    geojson_data = json.load(f)
 
-print("Testing custom bbox support...")
-try:
-    result = mosaic(
-        grid_id=None,
-        bounds=custom_bounds,
-        start_year=2022,
-        start_month=1,
-        start_day=1,
-        duration_months=1,
-        output_dir=output_dir,
-        sort_method="valid_data",
-        mosaic_method="max_ndvi", # Test both new features together!
-        required_bands=["visual"],
-        no_data_threshold=None,
-        overwrite=True
-    )
-    print(f"Success! Mosaic saved to: {result}")
-except Exception as e:
-    print(f"FAILED: {e}")
-    import traceback
-    traceback.print_exc()
+# Extract geometry (handles both Feature and FeatureCollection)
+if geojson_data.get("type") == "FeatureCollection":
+    geometry = geojson_data["features"][0]["geometry"]
+elif geojson_data.get("type") == "Feature":
+    geometry = geojson_data["geometry"]
+else:
+    geometry = geojson_data  # Already a geometry
+
+print(f"Loaded geometry from {geojson_path}")
+print(f"Geometry type: {geometry.get('type')}")
+
+# Create mosaic
+result = mosaic(
+    grid_id=None,
+    geometry=geometry,           # Pass GeoJSON directly
+    start_year=2023,
+    start_month=6,
+    start_day=1,
+    duration_months=3,
+    output_dir=Path("output_custom"),
+    mosaic_method="max_ndvi",
+    required_bands=["visual"],
+    ocm_batch_size=32,           # Optimized for H100
+    overwrite=True
+)
+
+print(f"Success! Mosaic saved to: {result}")
