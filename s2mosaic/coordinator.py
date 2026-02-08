@@ -36,7 +36,7 @@ def mosaic(
     required_bands: Optional[List[str]] = None,
     no_data_threshold: Optional[float] = 0.01,
     overwrite: bool = True,
-    ocm_batch_size: int = 1,
+    ocm_batch_size: int = 16,
     ocm_inference_dtype: str = "bf16",
     debug_cache: bool = False,
     additional_query: Optional[Dict[str, Any]] = None,

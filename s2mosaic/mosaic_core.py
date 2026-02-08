@@ -32,7 +32,7 @@ def download_bands_pool(
     ocm_batch_size: int = 6,
     ocm_inference_dtype: str = "bf16",
     debug_cache: bool = False,
-    max_dl_workers: int = 4,
+    max_dl_workers: int = 16,  # Increased for high-core systems
     percentile_value: float | None = 50.0,
 ) -> Tuple[np.ndarray, Dict[str, Any]]:
     s2_scene_size = 10980

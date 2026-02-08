@@ -166,7 +166,6 @@ def get_output_path(
 ) -> Path:
     output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
-    output_dir.mkdir(exist_ok=True, parents=True)
     bands_str = "_".join(required_bands)
     
     file_id = grid_id if grid_id else "custom_area"
